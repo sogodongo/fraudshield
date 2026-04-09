@@ -7,13 +7,57 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-      - run: pip install -r requirements.txt
-      - run: python -m pytest tests/ -v
-      # TODO: add ruff linting, Glue job validation, terraform fmt check
+          python-version: '3.11'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pandas psycopg2-binary pyspark
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Check formatting
+        run: ruff check src/ scripts/ tests/ --select E,F,W
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.7'
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive infra/terraform/
+
+      - name: Terraform validate
+        run: |
+          cd infra/terraform
+          terraform init -backend=false
+          terraform validate
