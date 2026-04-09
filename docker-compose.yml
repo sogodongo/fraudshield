@@ -1,0 +1,94 @@
+services:
+
+  # Generate synthetic transaction data
+  generate:
+    build: .
+    container_name: fraudshield-generate
+    volumes:
+      - ./data:/app/data
+    command: >
+      python scripts/generate_transactions.py
+      --count 100000
+      --output data/transactions.parquet
+      --merchants-output data/merchants.parquet
+      --days 30
+
+  # Run bronze to silver transformation
+  bronze-to-silver:
+    build: .
+    container_name: fraudshield-bronze-to-silver
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: >
+      python src/processing/batch/bronze_to_silver.py
+      --input data/transactions.parquet
+      --output data/silver/transactions_clean
+      --quarantine data/quarantine/transactions
+    depends_on:
+      generate:
+        condition: service_completed_successfully
+
+  # Run silver to gold aggregation
+  silver-to-gold:
+    build: .
+    container_name: fraudshield-silver-to-gold
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: >
+      python src/processing/batch/silver_to_gold.py
+      --input data/silver/transactions_clean
+      --output data/gold
+    depends_on:
+      bronze-to-silver:
+        condition: service_completed_successfully
+
+  # Run data quality checks
+  quality-check:
+    build: .
+    container_name: fraudshield-quality-check
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: >
+      python -c "
+      from pyspark.sql import SparkSession;
+      from src.quality.validators import run_silver_checks, run_gold_checks, print_results;
+      spark = SparkSession.builder.appName('quality').master('local[*]').getOrCreate();
+      silver = spark.read.parquet('data/silver/transactions_clean');
+      sr = run_silver_checks(silver);
+      print_results(sr);
+      kpi = spark.read.parquet('data/gold/kpi_daily');
+      merch = spark.read.parquet('data/gold/merchant_risk_profiles');
+      gr = run_gold_checks(kpi, merch);
+      print_results(gr);
+      spark.stop()
+      "
+    depends_on:
+      silver-to-gold:
+        condition: service_completed_successfully
+
+  # Run all tests
+  test:
+    build: .
+    container_name: fraudshield-test
+    command: python -m pytest tests/ -v --tb=short
+
+  # Full pipeline: generate -> bronze -> silver -> gold -> quality
+  pipeline:
+    build: .
+    container_name: fraudshield-pipeline
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: >
+      bash -c "
+        echo '=== Step 1: Generate Data ===' &&
+        python scripts/generate_transactions.py --count 50000 --output data/transactions.parquet --days 30 &&
+        echo '=== Step 2: Bronze to Silver ===' &&
+        python src/processing/batch/bronze_to_silver.py --input data/transactions.parquet --output data/silver/transactions_clean --quarantine data/quarantine/transactions &&
+        echo '=== Step 3: Silver to Gold ===' &&
+        python src/processing/batch/silver_to_gold.py --input data/silver/transactions_clean --output data/gold &&
+        echo '=== Pipeline Complete ==='
+      "

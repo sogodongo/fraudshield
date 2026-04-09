@@ -1,0 +1,12 @@
+venv/
+.venv/
+data/
+logs/
+.git/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.terraform/
+*.tfstate
+*.parquet
