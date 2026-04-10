@@ -1,6 +1,6 @@
 # FraudShield
 
-Real-time and batch fraud detection platform for payment transactions on AWS.
+Real-time and batch fraud detection platform for payment transactions on AWS..
 
 ## Overview
 
